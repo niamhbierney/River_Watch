@@ -64,6 +64,13 @@ footer{padding:18px 14px}
  .table-wrap table{font-size:12px}
 }
 
+
+#answer hr{border:0;border-top:1px solid #d5e1e9;margin:14px 0}
+.answer-table-wrap{max-width:100%;overflow-x:auto;margin:12px 0;-webkit-overflow-scrolling:touch}
+#answer .answer-table{width:100%;min-width:680px;border-collapse:collapse;font-size:.9rem}
+#answer .answer-table th,#answer .answer-table td{border:1px solid #d5e1e9;padding:9px;text-align:left;vertical-align:top;white-space:normal}
+#answer .answer-table th{background:#e5eef4;color:#123b55}
+
 </style>
 </head>
 <body>
@@ -495,20 +502,37 @@ function renderAnswer(markdown){
  const target=document.getElementById("answer");
  const escapeHTML=value=>String(value).replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
  const inline=value=>escapeHTML(value).replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>").replace(/\*(.+?)\*/g,"<em>$1</em>");
+ const cells=line=>line.trim().replace(/^\|/,"").replace(/\|$/,"").split("|").map(x=>x.trim());
+ const isTableLine=line=>line.includes("|")&&line.trim().startsWith("|");
+ const isSeparator=line=>/^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(line.trim());
  const lines=String(markdown||"").replace(/\r/g,"").split("\n");
  let html="",paragraph=[],listType=null;
  const flushParagraph=()=>{if(paragraph.length){html+="<p>"+inline(paragraph.join(" "))+"</p>";paragraph=[];}};
  const closeList=()=>{if(listType){html+="</"+listType+">";listType=null;}};
- lines.forEach(raw=>{
-  const line=raw.trim();
-  if(!line){flushParagraph();closeList();return;}
+ for(let i=0;i<lines.length;i++){
+  const line=lines[i].trim();
+  if(!line){flushParagraph();closeList();continue;}
+  if(line==="---"||line==="***"){flushParagraph();closeList();html+="<hr>";continue;}
+  if(isTableLine(line)){
+   flushParagraph();closeList();
+   const tableRows=[];
+   tableRows.push(cells(line));
+   if(i+1<lines.length&&isSeparator(lines[i+1]))i++;
+   while(i+1<lines.length&&isTableLine(lines[i+1].trim())){i++;if(!isSeparator(lines[i]))tableRows.push(cells(lines[i]));}
+   if(tableRows.length){
+    html+='<div class="answer-table-wrap"><table class="answer-table"><thead><tr>'+tableRows[0].map(cell=>"<th>"+inline(cell)+"</th>").join("")+"</tr></thead>";
+    if(tableRows.length>1)html+="<tbody>"+tableRows.slice(1).map(row=>"<tr>"+row.map(cell=>"<td>"+inline(cell)+"</td>").join("")+"</tr>").join("")+"</tbody>";
+    html+="</table></div>";
+   }
+   continue;
+  }
   const heading=line.match(/^(#{1,4})\s+(.+)$/);
-  if(heading){flushParagraph();closeList();const level=Math.min(heading[1].length+1,4);html+="<h"+level+">"+inline(heading[2])+"</h"+level+">";return;}
+  if(heading){flushParagraph();closeList();const level=Math.min(heading[1].length+1,4);html+="<h"+level+">"+inline(heading[2])+"</h"+level+">";continue;}
   const bullet=line.match(/^[-*•]\s+(.+)$/);
   const numbered=line.match(/^\d+[.)]\s+(.+)$/);
-  if(bullet||numbered){flushParagraph();const type=bullet?"ul":"ol";if(listType!==type){closeList();html+="<"+type+">";listType=type;}html+="<li>"+inline((bullet||numbered)[1])+"</li>";return;}
+  if(bullet||numbered){flushParagraph();const type=bullet?"ul":"ol";if(listType!==type){closeList();html+="<"+type+">";listType=type;}html+="<li>"+inline((bullet||numbered)[1])+"</li>";continue;}
   closeList();paragraph.push(line);
- });
+ }
  flushParagraph();closeList();
  target.innerHTML=html;
 }
@@ -594,7 +618,7 @@ Be concise, explain evidence, and distinguish live inputs from recommendations. 
   if(!response.ok)throw new Error(result.error?.message||"OpenAI API request failed (HTTP "+response.status+").");
   const answerText=(result.output||[]).flatMap(item=>item.content||[]).filter(item=>item.type==="output_text").map(item=>item.text).join("\n").trim();
   if(!answerText)throw new Error("The AI returned no text. Please try again.");
-   renderAnswer(answerText+"\n\nSources: Open-Meteo Flood API / Copernicus GloFAS; Met Éireann Open Data; River Watch Google Sheet; stored historical summary.");
+   renderAnswer(answerText);
  }catch(error){
   console.error("River Watch AI error:",error);
    renderAnswer("River Watch could not answer this question: "+error.message+" Please check the API key, available API credit, and source connections, then try again.");
