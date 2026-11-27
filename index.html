@@ -49,6 +49,14 @@ footer{text-align:center;padding:20px;font-size:13px}
 <p class="muted">Source: Open-Meteo Flood API, using Copernicus GloFAS. Model grid resolution is approximately 5 km; the nearest river cell may not always represent the local river accurately.</p>
 </section>
 <section>
+<h2>Met Éireann Weather Warnings</h2>
+<p>Live official weather warnings for Ireland. Orange or red warnings affecting a town's county and valid within the next 48 hours will be considered by the flood-plan rules.</p>
+<button onclick="loadWeatherWarnings()">Refresh Weather Warnings</button>
+<p id="warningStatus" class="muted" aria-live="polite">Waiting for Met Éireann warning data...</p>
+<div id="warningData"></div>
+<p class="muted">Source: Met Éireann Open Data. Copyright Met Éireann. Source: met.ie. Licence: CC BY 4.0. Met Éireann does not accept liability for errors or omissions.</p>
+</section>
+<section>
 <h2>Tonight's Flood Plan</h2>
 <p>Flood-plan calculations and Met Éireann warnings will be connected in a later step.</p>
 <div id="floodPlan">Waiting for forecast and warning connections...</div>
@@ -186,11 +194,50 @@ function loadSheetData(){
   status.textContent="Could not load the sheet in the website: "+error.message+". Check the CSV link and browser permissions.";
  });
 }
+
+const MET_WARNING_URL="https://www.met.ie/Open_Data/json/warning_IRELAND.json";
+async function loadWeatherWarnings(){
+ const status=document.getElementById("warningStatus");
+ const output=document.getElementById("warningData");
+ status.textContent="Checking the official Met Éireann feed...";
+ output.innerHTML="";
+ try{
+  const response=await fetch(MET_WARNING_URL+"?_"+Date.now(),{cache:"no-store"});
+  if(!response.ok)throw new Error("HTTP "+response.status);
+  const warnings=await response.json();
+  if(!Array.isArray(warnings))throw new Error("Unexpected warning-feed format.");
+  const now=Date.now();
+  const relevant=warnings.filter(w=>{
+   const level=String(w.level||"").toLowerCase();
+   const onset=Date.parse(w.onset), expiry=Date.parse(w.expiry);
+   return (level==="orange"||level==="red")&&Number.isFinite(onset)&&Number.isFinite(expiry)&&expiry>=now&&onset<=now+48*60*60*1000;
+  });
+  window.riverWatchWarnings=warnings;
+  if(!warnings.length){
+   status.textContent="Feed checked successfully. No current Met Éireann warnings.";
+   output.textContent="No active warnings are currently listed.";
+   return;
+  }
+  const list=document.createElement("ul");
+  warnings.forEach(w=>{
+   const li=document.createElement("li");
+   li.textContent=(String(w.level||"").toUpperCase()+" — ")+(w.headline||w.type||"Weather warning")+" | Affected regions: "+((w.regions||[]).join(", ")||"Not specified")+" | Valid: "+(w.onset||"not supplied")+" to "+(w.expiry||"not supplied");
+   list.appendChild(li);
+  });
+  output.appendChild(list);
+  status.textContent="Connected successfully — "+warnings.length+" current warning record(s). "+relevant.length+" orange/red warning(s) are active or begin within 48 hours. Last checked: "+new Date().toLocaleString();
+ }catch(error){
+  status.textContent="Could not retrieve Met Éireann warnings: "+error.message+". Please retry.";
+  window.riverWatchWarnings=[];
+ }
+}
+
 function askRiverWatch(){
  document.getElementById("answer").textContent="The AI connection will be added in a later step.";
 }
 loadSheetData();
 loadRiverForecasts();
+loadWeatherWarnings();
 </script>
 </body>
 </html>
