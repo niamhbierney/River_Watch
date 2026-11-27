@@ -67,8 +67,9 @@ footer{text-align:center;padding:20px;font-size:13px}
 </section>
 <section>
 <h2>Tonight's Flood Plan</h2>
-<p>Flood-plan calculations and Met Éireann warnings will be connected in a later step.</p>
-<div id="floodPlan">Waiting for forecast and warning connections...</div>
+<p>The plan is calculated using the latest river forecasts, historical thresholds, Google Sheet resources and Met Éireann warnings.</p>
+<button onclick="buildFloodPlan()">Refresh Tonight's Flood Plan</button>
+<div id="floodPlan">Flood plan is ready to be calculated.</div>
 </section>
 <section>
 <h2>Ask River Watch</h2>
@@ -311,7 +312,139 @@ async function loadWeatherWarnings(){
   window.riverWatchWarnings=[];
  }
 }
+async function buildFloodPlan(){
+ const output=document.getElementById("floodPlan");
+ output.textContent="Refreshing live data and calculating tonight's plan...";
 
+ try{
+  // Load the latest Google Sheet data
+  const sheetResponse=await fetch(SHEET_CSV_URL+"&_="+Date.now(),{cache:"no-store"});
+  if(!sheetResponse.ok)throw new Error("Could not refresh the Google Sheet.");
+  const rows=parseCSV(await sheetResponse.text());
+  const headers=rows[0].map(x=>x.trim());
+  const towns=rows.slice(1).map(row=>{
+   const item={};
+   headers.forEach((h,i)=>item[h]=(row[i]||"").trim());
+   return item;
+  });
+
+  // Load the saved historical thresholds
+  const history=JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY)||"null");
+  if(!history||!history.towns||history.towns.length!==8){
+   throw new Error("Please calculate the historical thresholds first.");
+  }
+
+  // Refresh forecasts for all eight towns
+  const forecasts=await Promise.all(RIVER_TOWNS.map(async place=>{
+   const url="https://flood-api.open-meteo.com/v1/flood?latitude="+place.lat+
+    "&longitude="+place.lon+"&daily=river_discharge&forecast_days=7&timezone=GMT";
+   const response=await fetch(url);
+   if(!response.ok)throw new Error("Forecast unavailable for "+place.town);
+   const data=await response.json();
+   return {town:place.town,dates:data.daily.time,flows:data.daily.river_discharge};
+  }));
+
+  // Refresh official weather warnings
+  const warningResponse=await fetch(MET_WARNING_URL+"?_="+Date.now(),{cache:"no-store"});
+  if(!warningResponse.ok)throw new Error("Could not refresh Met Éireann warnings.");
+  const warnings=await warningResponse.json();
+  const now=Date.now();
+
+  const plan=[];
+  towns.forEach(town=>{
+   const name=town.town;
+   const historyTown=history.towns.find(x=>x.town===name);
+   const forecast=forecasts.find(x=>x.town===name);
+   if(!historyTown||!forecast)throw new Error("Missing data for "+name);
+
+   const override=Number(town.flow_override_m3s);
+   const flow=town.flow_override_m3s!==""&&Number.isFinite(override)
+    ?override:forecast.flows[0];
+
+   const warningOverride=(town.warning_override||"").toLowerCase();
+   const matchingWarnings=warnings.filter(w=>{
+    const level=String(w.level||"").toLowerCase();
+    const onset=Date.parse(w.onset),expiry=Date.parse(w.expiry);
+    const regions=Array.isArray(w.regions)?w.regions.join(" ").toLowerCase():"";
+    return (level==="orange"||level==="red")&&
+     Number.isFinite(onset)&&Number.isFinite(expiry)&&
+     expiry>=now&&onset<=now+48*60*60*1000&&
+     regions.includes((town.county||"").toLowerCase());
+   });
+   const hasWarning=warningOverride==="orange"||warningOverride==="red"||matchingWarnings.length>0;
+
+   let level="Normal";
+   if(flow>=historyTown.percentile_99)level="Barriers";
+   else if(flow>=historyTown.percentile_95)level="Standby";
+
+   if(hasWarning){
+    if(level==="Normal")level="Standby";
+    else if(level==="Standby")level="Barriers";
+   }
+
+   plan.push({
+    town:name,river:town.river,county:town.county,flow,
+    p95:historyTown.percentile_95,p99:historyTown.percentile_99,
+    level,hasWarning,
+    barrierSets:Number(town.barrier_sets)||0,
+    notes:town.notes||""
+   });
+  });
+
+  // Rank towns needing barriers by percentage above the 99th percentile,
+  // then by forecast flow. Assign no more than two towns to each crew.
+  const crewAreas={
+   "Clonmel":["Clonmel","Fermoy","Enniscorthy"],
+   "Mallow":["Mallow","Fermoy","Bandon"],
+   "Athlone":["Athlone","Carrick-on-Shannon","Ennis"]
+  };
+  const crewUse={Clonmel:0,Mallow:0,Athlone:0};
+  const barrierTowns=plan.filter(t=>t.level==="Barriers")
+   .sort((a,b)=>(b.flow/b.p99-1)-(a.flow/a.p99-1)||b.flow-a.flow);
+
+  barrierTowns.forEach(t=>{
+   if(t.barrierSets<=0){
+    t.level="Standby";
+    t.escalate=true;
+    t.reason="No barrier sets available; Area Manager notified.";
+    return;
+   }
+   const available=Object.keys(crewAreas).filter(crew=>
+    crewAreas[crew].includes(t.town)&&crewUse[crew]<2
+   );
+   if(!available.length){
+    t.level="Standby";
+    t.escalate=true;
+    t.reason="No available crew capacity; Area Manager notified.";
+   }else{
+    const crew=available.sort((a,b)=>crewUse[a]-crewUse[b])[0];
+    crewUse[crew]++;
+    t.assignedCrew=crew;
+   }
+  });
+
+  // Display the plan and the evidence behind each level
+  const date=forecasts[0].dates[0];
+  let html="<h3>Flood response plan — "+date+"</h3>";
+  html+="<p>Forecasts and warnings refreshed at "+new Date().toLocaleString()+".</p>";
+  html+="<table><tr><th>Town</th><th>Forecast (m³/s)</th><th>95th percentile</th><th>99th percentile</th><th>Level</th><th>Crew / action</th></tr>";
+
+  plan.forEach(t=>{
+   let action=t.assignedCrew?"Barrier crew: "+t.assignedCrew:
+    t.escalate?"Standby measures; Area Manager notified":
+    t.level==="Standby"?"Standby measures":"Normal monitoring";
+   html+="<tr><td>"+t.town+"</td><td>"+t.flow.toFixed(1)+
+    "</td><td>"+t.p95.toFixed(3)+"</td><td>"+t.p99.toFixed(3)+
+    "</td><td>"+t.level+"</td><td>"+action+"</td></tr>";
+  });
+  html+="</table>";
+  html+="<p><strong>Important:</strong> This is decision support only. The Duty Officer must review the information and make the final decision.</p>";
+  output.innerHTML=html;
+
+ }catch(error){
+  output.textContent="Flood plan could not be calculated: "+error.message;
+ }
+}
 function askRiverWatch(){
  document.getElementById("answer").textContent="The AI connection will be added in a later step.";
 }
@@ -319,6 +452,7 @@ loadSheetData();
 loadRiverForecasts();
 loadWeatherWarnings();
 loadHistorySummary();
+buildFloodPlan();
 </script>
 </body>
 </html>
