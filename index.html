@@ -49,6 +49,15 @@ footer{text-align:center;padding:20px;font-size:13px}
 <p class="muted">Source: Open-Meteo Flood API, using Copernicus GloFAS. Model grid resolution is approximately 5 km; the nearest river cell may not always represent the local river accurately.</p>
 </section>
 <section>
+<h2>Historical River-Flow Thresholds</h2>
+<p>Ten full years of daily modelled river discharge (1 January 2016 to 31 December 2025). River Watch calculates each town's 95th and 99th percentiles once and stores the summary in this browser.</p>
+<button onclick="loadHistorySummary(true)">Calculate / Refresh Historical Thresholds</button>
+<p id="historyStatus" class="muted" aria-live="polite">Historical summary not loaded yet.</p>
+<div id="historyData" class="table-wrap"></div>
+<button onclick="downloadHistorySummary()">Download History Summary JSON</button>
+<p class="muted">Method: linear-interpolated percentiles (equivalent to Excel PERCENTILE.INC). Source: Open-Meteo Flood API, Copernicus GloFAS. Modelled grid-cell estimates, not local gauge observations.</p>
+</section>
+<section>
 <h2>Met Éireann Weather Warnings</h2>
 <p>Live official weather warnings for Ireland. Orange or red warnings affecting a town's county and valid within the next 48 hours will be considered by the flood-plan rules.</p>
 <button onclick="loadWeatherWarnings()">Refresh Weather Warnings</button>
@@ -195,6 +204,64 @@ function loadSheetData(){
  });
 }
 
+
+const HISTORY_START="2016-01-01";
+const HISTORY_END="2025-12-31";
+const HISTORY_STORAGE_KEY="riverWatchHistorySummary_v1";
+function percentile(values,p){
+ const sorted=values.filter(Number.isFinite).sort((a,b)=>a-b);
+ if(!sorted.length)return null;
+ const position=(sorted.length-1)*p;
+ const lower=Math.floor(position),upper=Math.ceil(position);
+ if(lower===upper)return sorted[lower];
+ return sorted[lower]+(sorted[upper]-sorted[lower])*(position-lower);
+}
+async function loadHistorySummary(force=false){
+ const status=document.getElementById("historyStatus");
+ const output=document.getElementById("historyData");
+ if(!force){
+  const cached=localStorage.getItem(HISTORY_STORAGE_KEY);
+  if(cached){
+   try{const saved=JSON.parse(cached);renderHistorySummary(saved);status.textContent="Loaded saved ten-year summary from this browser. Last calculated: "+saved.calculated_at;return;}
+   catch(e){localStorage.removeItem(HISTORY_STORAGE_KEY);}
+  }
+ }
+ status.textContent="Downloading ten years of daily river-flow history for eight towns. This may take a little while...";
+ output.innerHTML="";
+ try{
+  const summaries=await Promise.all(RIVER_TOWNS.map(async place=>{
+   const url="https://flood-api.open-meteo.com/v1/flood?latitude="+place.lat+"&longitude="+place.lon+"&daily=river_discharge&start_date="+HISTORY_START+"&end_date="+HISTORY_END+"&timezone=GMT";
+   const response=await fetch(url);
+   if(!response.ok)throw new Error(place.town+": HTTP "+response.status);
+   const data=await response.json();
+   if(data.error||!data.daily||!Array.isArray(data.daily.river_discharge))throw new Error(place.town+": "+(data.reason||"No daily history returned"));
+   const pairs=data.daily.time.map((date,i)=>({date,value:data.daily.river_discharge[i]})).filter(x=>x.date>=HISTORY_START&&x.date<=HISTORY_END&&Number.isFinite(x.value));
+   if(pairs.length<3650)throw new Error(place.town+": fewer than 10 years of valid daily values ("+pairs.length+" days)");
+   const values=pairs.map(x=>x.value);
+   return {town:place.town,river:place.river,latitude:place.lat,longitude:place.lon,period_start:pairs[0].date,period_end:pairs[pairs.length-1].date,valid_days:pairs.length,percentile_95:Number(percentile(values,.95).toFixed(3)),percentile_99:Number(percentile(values,.99).toFixed(3))};
+  }));
+  const summary={source:"Open-Meteo Flood API / Copernicus GloFAS",period_start:HISTORY_START,period_end:HISTORY_END,percentile_method:"Linear interpolation; Excel PERCENTILE.INC",calculated_at:new Date().toISOString(),towns:summaries};
+  localStorage.setItem(HISTORY_STORAGE_KEY,JSON.stringify(summary));
+  renderHistorySummary(summary);
+  status.textContent="Success — thresholds calculated for all "+summaries.length+" towns and saved in this browser. "+new Date().toLocaleString();
+ }catch(error){status.textContent="History calculation failed: "+error.message+". Please retry; no partial summary has been saved.";}
+}
+function renderHistorySummary(summary){
+ const output=document.getElementById("historyData");output.innerHTML="";
+ const table=document.createElement("table"),head=document.createElement("tr");
+ ["Town","River","Valid days","Period","95th percentile (m³/s)","99th percentile (m³/s)"].forEach(x=>{const th=document.createElement("th");th.textContent=x;head.appendChild(th);});
+ const thead=document.createElement("thead");thead.appendChild(head);table.appendChild(thead);
+ const tbody=document.createElement("tbody");
+ (summary.towns||[]).forEach(t=>{const tr=document.createElement("tr");[t.town,t.river,t.valid_days,t.period_start+" to "+t.period_end,Number(t.percentile_95).toFixed(3),Number(t.percentile_99).toFixed(3)].forEach(x=>{const td=document.createElement("td");td.textContent=x;tr.appendChild(td);});tbody.appendChild(tr);});
+ table.appendChild(tbody);output.appendChild(table);
+}
+function downloadHistorySummary(){
+ const saved=localStorage.getItem(HISTORY_STORAGE_KEY);
+ if(!saved){document.getElementById("historyStatus").textContent="Calculate the history summary first.";return;}
+ const blob=new Blob([saved],{type:"application/json"}),url=URL.createObjectURL(blob);
+ const a=document.createElement("a");a.href=url;a.download="river_watch_history_summary.json";a.click();URL.revokeObjectURL(url);
+}
+
 const MET_WARNING_URL="https://www.met.ie/Open_Data/json/warning_IRELAND.json";
 async function loadWeatherWarnings(){
  const status=document.getElementById("warningStatus");
@@ -238,6 +305,7 @@ function askRiverWatch(){
 loadSheetData();
 loadRiverForecasts();
 loadWeatherWarnings();
+loadHistorySummary();
 </script>
 </body>
 </html>
