@@ -386,7 +386,7 @@ function warningAffectsTown(warning,town,now=Date.now()){
  };
  const regionCodes=Array.isArray(warning.regions)?warning.regions.map(code=>String(code).trim().toUpperCase()):[];
  return getTownCounties(town).some(county=>{
-  const normalized=String(county).toLowerCase().replace(/^county\\s+/,"").replace(/^co\\.?\\s+/,"").trim();
+  const normalized=String(county).toLowerCase().replace(/^county\s+/,"").replace(/^co\.?\s+/,"").trim();
   const code=countyFips[normalized];
   return Boolean(code&&regionCodes.includes(code));
  });
