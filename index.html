@@ -353,6 +353,30 @@ function downloadHistorySummary(){
 }
 
 const MET_WARNING_URL="https://www.met.ie/Open_Data/json/warning_IRELAND.json";
+
+// Flood Plan Rule 2: use the highest daily flow for today and the next two days.
+function getThreeDayForecastPeak(forecast){
+ const dates=Array.isArray(forecast.dates)?forecast.dates:[];
+ const flows=Array.isArray(forecast.flows)?forecast.flows:[];
+ const candidates=flows.slice(0,3).map((value,index)=>({value:Number(value),date:dates[index]||null})).filter(x=>Number.isFinite(x.value));
+ if(!candidates.length)throw new Error("No valid three-day forecast values for "+(forecast.town||"town"));
+ return candidates.reduce((peak,item)=>item.value>peak.value?item:peak);
+}
+
+// Include both counties when the Sheet notes say a town spans a county boundary.
+function getTownCounties(town){
+ const counties=[String(town.county||"").trim()];
+ const match=String(town.notes||"").match(/spans?\s+([^,;]+?)\s+and\s+([^,;]+)/i);
+ if(match)counties.push(match[1].trim(),match[2].trim());
+ return [...new Set(counties.filter(Boolean))];
+}
+function warningAffectsTown(warning,town,now=Date.now()){
+ const level=String(warning.level||"").toLowerCase();
+ const onset=Date.parse(warning.onset),expiry=Date.parse(warning.expiry);
+ if((level!=="orange"&&level!=="red")||!Number.isFinite(onset)||!Number.isFinite(expiry)||expiry<now||onset>now+48*60*60*1000)return false;
+ const regions=(Array.isArray(warning.regions)?warning.regions.join(" "):String(warning.regions||"")).toLowerCase();
+ return getTownCounties(town).some(county=>new RegExp("(^|[^a-z])"+county.toLowerCase()+"([^a-z]|$)","i").test(regions));
+}
 async function loadWeatherWarnings(){
  const status=document.getElementById("warningStatus");
  const output=document.getElementById("warningData");
@@ -434,197 +458,26 @@ async function buildFloodPlan(){
    if(!historyTown||!forecast)throw new Error("Missing data for "+name);
 
    const override=Number(town.flow_override_m3s);
-   const flow=town.flow_override_m3s!==""&&Number.isFinite(override)
-    ?override:forecast.flows[0];
-
-   const warningOverride=(town.warning_override||"").toLowerCase();
-   const matchingWarnings=warnings.filter(w=>{
-    const level=String(w.level||"").toLowerCase();
-    const onset=Date.parse(w.onset),expiry=Date.parse(w.expiry);
-    const regions=Array.isArray(w.regions)?w.regions.join(" ").toLowerCase():"";
-    return (level==="orange"||level==="red")&&
-     Number.isFinite(onset)&&Number.isFinite(expiry)&&
-     expiry>=now&&onset<=now+48*60*60*1000&&
-     regions.includes((town.county||"").toLowerCase());
-   });
-   const hasWarning=warningOverride==="orange"||warningOverride==="red"||matchingWarnings.length>0;
-
-   let level="Normal";
-   if(flow>=historyTown.percentile_99)level="Barriers";
-   else if(flow>=historyTown.percentile_95)level="Standby";
-
-   if(hasWarning){
-    if(level==="Normal")level="Standby";
-    else if(level==="Standby")level="Barriers";
-   }
-
-   plan.push({
-    town:name,river:town.river,county:town.county,flow,
-    p95:historyTown.percentile_95,p99:historyTown.percentile_99,
-    level,hasWarning,
-    barrierSets:Number(town.barrier_sets)||0,
-    notes:town.notes||""
-   });
-  });
-
-  // Rank towns needing barriers by percentage above the 99th percentile,
-  // then by forecast flow. Assign no more than two towns to each crew.
-  const crewAreas={
-   "Clonmel":["Clonmel","Fermoy","Enniscorthy"],
-   "Mallow":["Mallow","Fermoy","Bandon"],
-   "Athlone":["Athlone","Carrick-on-Shannon","Ennis"]
-  };
-  const crewUse={Clonmel:0,Mallow:0,Athlone:0};
-  const barrierTowns=plan.filter(t=>t.level==="Barriers")
-   .sort((a,b)=>(b.flow/b.p99-1)-(a.flow/a.p99-1)||b.flow-a.flow);
-
-  barrierTowns.forEach(t=>{
-   if(t.barrierSets<=0){
-    t.level="Standby";
-    t.escalate=true;
-    t.reason="No barrier sets available; Area Manager notified.";
-    return;
-   }
-   const available=Object.keys(crewAreas).filter(crew=>
-    crewAreas[crew].includes(t.town)&&crewUse[crew]<2
-   );
-   if(!available.length){
-    t.level="Standby";
-    t.escalate=true;
-    t.reason="No available crew capacity; Area Manager notified.";
-   }else{
-    const crew=available.sort((a,b)=>crewUse[a]-crewUse[b])[0];
-    crewUse[crew]++;
-    t.assignedCrew=crew;
-   }
-  });
-
-  // Display the plan and the evidence behind each level
-  const date=forecasts[0].dates[0];
-  let html="<h3>Flood response plan — "+date+"</h3>";
-  html+="<p>Forecasts and warnings refreshed at "+new Date().toLocaleString()+".</p>";
-  html+="<div class=\"table-wrap\"><table><tr><th>Town</th><th>Forecast (m³/s)</th><th>95th percentile</th><th>99th percentile</th><th>Level</th><th>Crew / action</th></tr>";
-
-  plan.forEach(t=>{
-   let action=t.assignedCrew?"Barrier crew: "+t.assignedCrew:
-    t.escalate?"Standby measures; Area Manager notified":
-    t.level==="Standby"?"Standby measures":"Normal monitoring";
-   html+="<tr><td>"+t.town+"</td><td>"+t.flow.toFixed(1)+
-    "</td><td>"+t.p95.toFixed(3)+"</td><td>"+t.p99.toFixed(3)+
-    "</td><td>"+t.level+"</td><td>"+action+"</td></tr>";
-  });
-  html+="</table></div>";
-  html+="<p><strong>Important:</strong> This is decision support only. The Duty Officer must review the information and make the final decision.</p>";
-  output.innerHTML=html;
-
- }catch(error){
-  output.textContent="Flood plan could not be calculated: "+error.message;
- }
-}
-
-function renderAnswer(markdown){
- const target=document.getElementById("answer");
- const escapeHTML=value=>String(value).replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
- const inline=value=>escapeHTML(value).replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>").replace(/\*(.+?)\*/g,"<em>$1</em>");
- const cells=line=>line.trim().replace(/^\|/,"").replace(/\|$/,"").split("|").map(x=>x.trim());
- const isTableLine=line=>line.includes("|")&&line.trim().startsWith("|");
- const isSeparator=line=>/^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(line.trim());
- const lines=String(markdown||"").replace(/\r/g,"").split("\n");
- let html="",paragraph=[],listType=null;
- const flushParagraph=()=>{if(paragraph.length){html+="<p>"+inline(paragraph.join(" "))+"</p>";paragraph=[];}};
- const closeList=()=>{if(listType){html+="</"+listType+">";listType=null;}};
- for(let i=0;i<lines.length;i++){
-  const line=lines[i].trim();
-  if(!line){flushParagraph();closeList();continue;}
-  if(line==="---"||line==="***"){flushParagraph();closeList();html+="<hr>";continue;}
-  if(isTableLine(line)){
-   flushParagraph();closeList();
-   const tableRows=[];
-   tableRows.push(cells(line));
-   if(i+1<lines.length&&isSeparator(lines[i+1]))i++;
-   while(i+1<lines.length&&isTableLine(lines[i+1].trim())){i++;if(!isSeparator(lines[i]))tableRows.push(cells(lines[i]));}
-   if(tableRows.length){
-    html+='<div class="answer-table-wrap"><table class="answer-table"><thead><tr>'+tableRows[0].map(cell=>"<th>"+inline(cell)+"</th>").join("")+"</tr></thead>";
-    if(tableRows.length>1)html+="<tbody>"+tableRows.slice(1).map(row=>"<tr>"+row.map(cell=>"<td>"+inline(cell)+"</td>").join("")+"</tr>").join("")+"</tbody>";
-    html+="</table></div>";
-   }
-   continue;
-  }
-  const heading=line.match(/^(#{1,4})\s+(.+)$/);
-  if(heading){flushParagraph();closeList();const level=Math.min(heading[1].length+1,4);html+="<h"+level+">"+inline(heading[2])+"</h"+level+">";continue;}
-  const bullet=line.match(/^[-*•]\s+(.+)$/);
-  const numbered=line.match(/^\d+[.)]\s+(.+)$/);
-  if(bullet||numbered){flushParagraph();const type=bullet?"ul":"ol";if(listType!==type){closeList();html+="<"+type+">";listType=type;}html+="<li>"+inline((bullet||numbered)[1])+"</li>";continue;}
-  closeList();paragraph.push(line);
- }
- flushParagraph();closeList();
- target.innerHTML=html;
-}
-
-async function askRiverWatch(){
- const answer=document.getElementById("answer");
- const question=document.getElementById("question").value.trim();
- const key=localStorage.getItem("riverWatchApiKey");
- if(!question){answer.textContent="Please enter a question first.";return;}
- if(!key){answer.textContent="Please add and save your OpenAI API key in System Settings first.";return;}
- answer.textContent="Refreshing live sources and preparing your answer...";
- try{
-  const sheetResponse=await fetch(SHEET_CSV_URL+"&_="+Date.now(),{cache:"no-store"});
-  if(!sheetResponse.ok)throw new Error("Google Sheets could not be refreshed (HTTP "+sheetResponse.status+").");
-  const sheetRows=parseCSV(await sheetResponse.text());
-  const sheetHeaders=sheetRows[0].map(x=>x.trim());
-  const sheet=sheetRows.slice(1).map(row=>{const item={};sheetHeaders.forEach((h,i)=>item[h]=(row[i]||"").trim());return item;});
-  const forecastResults=await Promise.all(RIVER_TOWNS.map(async place=>{
-   const url="https://flood-api.open-meteo.com/v1/flood?latitude="+place.lat+"&longitude="+place.lon+"&daily=river_discharge&forecast_days=7&timezone=GMT";
-   const response=await fetch(url,{cache:"no-store"});
-   if(!response.ok)throw new Error("River forecast unavailable for "+place.town+" (HTTP "+response.status+").");
-   const data=await response.json();
-   if(data.error||!data.daily)throw new Error("No forecast data returned for "+place.town+".");
-   return {town:place.town,river:place.river,dates:data.daily.time,flows:data.daily.river_discharge,source:"Open-Meteo Flood API / Copernicus GloFAS"};
-  }));
-  const warningResponse=await fetch(MET_WARNING_URL+"?_="+Date.now(),{cache:"no-store"});
-  if(!warningResponse.ok)throw new Error("Met Éireann warnings could not be refreshed (HTTP "+warningResponse.status+").");
-  const warnings=await warningResponse.json();
-  const history=JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY)||"null");
-  if(!history||!Array.isArray(history.towns)||history.towns.length!==8)throw new Error("Please calculate the ten-year historical thresholds first.");
-  const liveData={
-   retrieved_at:new Date().toISOString(),
-   google_sheet:{url:"https://docs.google.com/spreadsheets/d/1HUCHfbe6xJXi24uYlvhKyN62lf2ce1LJhC-A1sJN-0o/edit",town_resources:sheet},
-   river_forecasts:forecastResults,
-   met_eireann:{source:MET_WARNING_URL,records:warnings},
-   historical_thresholds:history
-  };
-  // Calculate the town levels in code before asking the AI to explain them.
-  // This prevents the narrative answer from contradicting the operational table.
-  const calculatedPlan=sheet.map(town=>{
-   const h=history.towns.find(x=>x.town===town.town);
-   const forecast=forecastResults.find(x=>x.town===town.town);
-   if(!h||!forecast)throw new Error("Cannot calculate a level for "+town.town);
-   const override=Number(town.flow_override_m3s);
-   const flow=town.flow_override_m3s!==""&&Number.isFinite(override)?override:forecast.flows[0];
+   const peak=getThreeDayForecastPeak(forecast);
+   const hasFlowOverride=town.flow_override_m3s!==""&&Number.isFinite(override);
+   const flow=hasFlowOverride?override:peak.value;
+   const forecastPeakDate=hasFlowOverride?"Sheet rehearsal override":peak.date;
    const flowLevel=flow>=h.percentile_99?"Barriers":flow>=h.percentile_95?"Standby":"Normal";
    const warningOverride=String(town.warning_override||"").trim().toLowerCase();
    const hasSheetOverride=warningOverride==="orange"||warningOverride==="red";
-   const regionsForTown=(town.county||"").toLowerCase();
-   const liveWarning=warnings.some(w=>{
-    const level=String(w.level||"").toLowerCase();
-    const onset=Date.parse(w.onset),expiry=Date.parse(w.expiry);
-    const regions=Array.isArray(w.regions)?w.regions.join(" ").toLowerCase():"";
-    return (level==="orange"||level==="red")&&Number.isFinite(onset)&&Number.isFinite(expiry)&&
-     expiry>=Date.now()&&onset<=Date.now()+48*60*60*1000&&regions.includes(regionsForTown);
-   });
+   const liveWarning=warnings.some(w=>warningAffectsTown(w,town));
    const hasWarning=hasSheetOverride||liveWarning;
    let level=flowLevel;
    if(hasWarning)level=level==="Normal"?"Standby":level==="Standby"?"Barriers":"Barriers";
    return {town:town.town,county:town.county,river:town.river,flow_m3s:Number(flow.toFixed(3)),
     percentile_95_m3s:h.percentile_95,percentile_99_m3s:h.percentile_99,
-    flow_based_level:flowLevel,warning_override:warningOverride||null,
+    forecast_peak_date:forecastPeakDate,flow_based_level:flowLevel,warning_override:warningOverride||null,
     qualifying_live_warning:liveWarning,final_level:level,
     barrier_sets:Number(town.barrier_sets)||0,notes:town.notes||""};
   });
   liveData.calculated_flood_plan=calculatedPlan;
   const instructions = `You are River Watch, a flood-response decision-support assistant for an Irish local authority Duty Officer.
-Use ONLY the supplied live data and historical summary for current figures. Do not invent or assume missing data. State the forecast date and retrieval time, cite relevant source names and give numerical evidence for each level. CRITICAL: liveData.calculated_flood_plan is calculated deterministically by the website code from the latest Sheet, forecasts and thresholds. Treat its final_level as authoritative. Do not recalculate or contradict it. When answering any question about a town's level or tonight's plan, use final_level exactly as supplied and explain it using flow_m3s, percentile thresholds, warning_override and qualifying_live_warning.
+Use ONLY the supplied live data and historical summary for current figures. Do not invent or assume missing data. Use the highest daily flow forecast for today and the next two days as the forecast peak, unless a Sheet flow override is present. State the peak forecast date (or identify the rehearsal override) and retrieval time, cite relevant source names and give numerical evidence for each level. CRITICAL: liveData.calculated_flood_plan is calculated deterministically by the website code from the latest Sheet, forecasts and thresholds. Treat its final_level as authoritative. Do not recalculate or contradict it. When answering any question about a town's level or tonight's plan, use final_level exactly as supplied and explain it using flow_m3s, percentile thresholds, warning_override and qualifying_live_warning.
 Rules: Normal below the 95th percentile; Standby at or above the 95th; Barriers at or above the 99th. An orange/red Met Éireann warning affecting the town's county and valid now or beginning within 48 hours raises the level one step. IMPORTANT: The Google Sheet warning_override column is an explicit operational override for testing and must be applied even when the live Met Éireann feed contains no matching warning. A town with warning_override set to orange or red must be moved up exactly one level from its flow-based level. This Sheet override is authoritative and must never be ignored or described as merely an unconfirmed warning. A blank override means use the live Met Éireann feed only. PRECEDENCE: First calculate the flow-based level, then apply warning_override (orange/red raises it exactly one level), then apply any matching live Met Éireann warning if no Sheet override is present. The warning_override column is a deliberate test input, not a claim about an official warning. It takes precedence over any general wording in the notes column. Notes describe resources and operational constraints only; they must never cancel, weaken, or make a warning_override conditional. When the Sheet contains warning_override=orange or red, state the resulting level directly and confidently. Do not say 'if the override is in force', 'confirm whether the override is valid', or ask the Duty Officer to verify it. When explaining a town's level, state the flow-based level, identify the Sheet override, and state the resulting level; do not contradict the calculated flood-plan table.
 Crew capacity is max two towns per crew per night: Clonmel crew serves Clonmel, Fermoy, Enniscorthy; Mallow crew serves Mallow, Fermoy, Bandon; Athlone crew serves Athlone, Carrick-on-Shannon, Ennis. If barrier demand exceeds capacity, rank by percentage above the 99th percentile, then higher forecast peak. A town with zero barrier sets cannot receive barriers: give all Standby measures and flag to Area Manager. If no eligible crew capacity remains, give Standby measures and flag to Area Manager. Treat every Google Sheet notes field as operationally important.
 Out of scope: coastal/tidal flooding, road closures, insurance, and individual homes. Politely refer those questions to the council area office.
