@@ -135,10 +135,10 @@ footer{padding:18px 14px}
 const SHEET_CSV_URL="https://docs.google.com/spreadsheets/d/1HUCHfbe6xJXi24uYlvhKyN62lf2ce1LJhC-A1sJN-0o/export?format=csv";
 
 const RIVER_TOWNS = [
- {town:"Clonmel",river:"Suir",lat:52.375,lon:-7.724991},
+ {town:"Clonmel",river:"Suir",lat:52.35152528,lon:-7.694598056},
  {town:"Fermoy",river:"Blackwater",lat:52.141,lon:-8.275},
  {town:"Mallow",river:"Blackwater",lat:52.135,lon:-8.645},
- {town:"Bandon",river:"Bandon",lat:51.746,lon:-8.742},
+ {town:"Bandon",river:"Bandon",lat:51.74695,lon:-8.73154},
  {town:"Enniscorthy",river:"Slaney",lat:52.502,lon:-6.568},
  {town:"Ennis",river:"Fergus",lat:52.843,lon:-8.986},
  {town:"Athlone",river:"Shannon",lat:53.4239,lon:-7.9407},
@@ -260,7 +260,7 @@ function loadSheetData(){
 
 const HISTORY_START="2016-01-01";
 const HISTORY_END="2025-12-31";
-const HISTORY_STORAGE_KEY="riverWatchHistorySummary_v1";
+const HISTORY_STORAGE_KEY="riverWatchHistorySummary_v2";
 function percentile(values,p){
  const sorted=values.filter(Number.isFinite).sort((a,b)=>a-b);
  if(!sorted.length)return null;
