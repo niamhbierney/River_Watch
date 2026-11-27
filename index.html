@@ -226,25 +226,38 @@ async function loadHistorySummary(force=false){
    catch(e){localStorage.removeItem(HISTORY_STORAGE_KEY);}
   }
  }
- status.textContent="Downloading ten years of daily river-flow history for eight towns. This may take a little while...";
+ status.textContent="Downloading historical data one town at a time to respect the source API rate limit. Please keep this page open...";
  output.innerHTML="";
  try{
-  const summaries=await Promise.all(RIVER_TOWNS.map(async place=>{
+  const summaries=[];
+  for(let index=0;index<RIVER_TOWNS.length;index++){
+   const place=RIVER_TOWNS[index];
+   status.textContent="Downloading history for "+place.town+" ("+(index+1)+" of "+RIVER_TOWNS.length+")...";
    const url="https://flood-api.open-meteo.com/v1/flood?latitude="+place.lat+"&longitude="+place.lon+"&daily=river_discharge&start_date="+HISTORY_START+"&end_date="+HISTORY_END+"&timezone=GMT";
-   const response=await fetch(url);
-   if(!response.ok)throw new Error(place.town+": HTTP "+response.status);
+   let response=null;
+   for(let attempt=0;attempt<4;attempt++){
+    response=await fetch(url);
+    if(response.status!==429&&!response.status>=500)break;
+    if(response.status!==429&&response.status<500)break;
+    const retryAfter=Number(response.headers.get("Retry-After"));
+    const waitMs=Number.isFinite(retryAfter)&&retryAfter>0?retryAfter*1000:Math.min(30000,5000*Math.pow(2,attempt));
+    status.textContent="Source API is rate-limiting requests. Waiting "+Math.round(waitMs/1000)+" seconds before retrying "+place.town+"...";
+    await new Promise(resolve=>setTimeout(resolve,waitMs));
+   }
+   if(!response||!response.ok)throw new Error(place.town+": HTTP "+(response?response.status:"no response")+" after retries");
    const data=await response.json();
    if(data.error||!data.daily||!Array.isArray(data.daily.river_discharge))throw new Error(place.town+": "+(data.reason||"No daily history returned"));
    const pairs=data.daily.time.map((date,i)=>({date,value:data.daily.river_discharge[i]})).filter(x=>x.date>=HISTORY_START&&x.date<=HISTORY_END&&Number.isFinite(x.value));
    if(pairs.length<3650)throw new Error(place.town+": fewer than 10 years of valid daily values ("+pairs.length+" days)");
    const values=pairs.map(x=>x.value);
-   return {town:place.town,river:place.river,latitude:place.lat,longitude:place.lon,period_start:pairs[0].date,period_end:pairs[pairs.length-1].date,valid_days:pairs.length,percentile_95:Number(percentile(values,.95).toFixed(3)),percentile_99:Number(percentile(values,.99).toFixed(3))};
-  }));
+   summaries.push({town:place.town,river:place.river,latitude:place.lat,longitude:place.lon,period_start:pairs[0].date,period_end:pairs[pairs.length-1].date,valid_days:pairs.length,percentile_95:Number(percentile(values,.95).toFixed(3)),percentile_99:Number(percentile(values,.99).toFixed(3))});
+   if(index<RIVER_TOWNS.length-1)await new Promise(resolve=>setTimeout(resolve,2000));
+  }
   const summary={source:"Open-Meteo Flood API / Copernicus GloFAS",period_start:HISTORY_START,period_end:HISTORY_END,percentile_method:"Linear interpolation; Excel PERCENTILE.INC",calculated_at:new Date().toISOString(),towns:summaries};
   localStorage.setItem(HISTORY_STORAGE_KEY,JSON.stringify(summary));
   renderHistorySummary(summary);
   status.textContent="Success — thresholds calculated for all "+summaries.length+" towns and saved in this browser. "+new Date().toLocaleString();
- }catch(error){status.textContent="History calculation failed: "+error.message+". Please retry; no partial summary has been saved.";}
+ }catch(error){status.textContent="History calculation failed: "+error.message+". No partial summary has been saved. Wait a few minutes and retry.";}
 }
 function renderHistorySummary(summary){
  const output=document.getElementById("historyData");output.innerHTML="";
