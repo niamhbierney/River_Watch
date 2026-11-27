@@ -19,6 +19,51 @@ th,td{border:1px solid #d7e0e7;padding:9px;text-align:left;white-space:nowrap}
 th{background:#eaf1f5}
 .muted{color:#607482;font-size:13px}
 footer{text-align:center;padding:20px;font-size:13px}
+
+/* Responsive layout for desktop, tablet and mobile */
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{min-width:320px;line-height:1.5}
+header{padding:clamp(18px,4vw,30px) 16px}
+header h1{margin:0 0 6px;font-size:clamp(1.65rem,4vw,2.2rem)}
+header p{margin:0}
+main{width:min(1100px,100%);margin:clamp(12px,3vw,30px) auto;padding:clamp(10px,2.5vw,20px)}
+section{padding:clamp(15px,3vw,22px);margin-bottom:16px;min-width:0}
+section h2{margin-top:0;font-size:clamp(1.15rem,2.5vw,1.4rem)}
+input,button,textarea{font:inherit;max-width:100%}
+input[type=password],textarea{width:100%;border:1px solid #b9c9d4;border-radius:6px;padding:12px;background:#fff;color:#183247}
+textarea{resize:vertical;min-height:84px}
+button{min-height:44px;padding:10px 16px;margin:6px 6px 4px 0}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid #65b9d5;outline-offset:2px}
+.table-wrap{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{min-width:620px}
+#answer{margin-top:16px;padding:clamp(14px,3vw,22px);background:#f3f7fa;border:1px solid #d5e1e9;border-left:4px solid #176b87;border-radius:8px;overflow-wrap:anywhere}
+#answer:empty{display:none}
+#answer h3{margin:18px 0 8px;color:#123b55;font-size:1.12rem}
+#answer h3:first-child{margin-top:0}
+#answer h4{margin:14px 0 6px;color:#176b87;font-size:1rem}
+#answer p{margin:8px 0}
+#answer ul,#answer ol{padding-left:22px;margin:7px 0 12px}
+#answer li{margin:5px 0}
+#answer strong{color:#123b55}
+#answer .answer-sources{margin-top:16px;padding-top:10px;border-top:1px solid #d5e1e9;color:#526b7a;font-size:.88rem}
+.muted{line-height:1.45}
+footer{padding:18px 14px}
+@media(max-width:700px){
+ main{margin:8px auto;padding:8px}
+ section{border-radius:8px;margin-bottom:12px}
+ header{padding:18px 12px}
+ button{margin:6px 6px 4px 0}
+ #sheetData,#forecastData,#historyData{margin-right:-2px}
+}
+@media(max-width:420px){
+ body{font-size:15px}
+ section{padding:14px}
+ button{width:100%;margin:6px 0}
+ input[type=password],textarea{font-size:16px}
+ .table-wrap table{font-size:12px}
+}
+
 </style>
 </head>
 <body>
@@ -445,6 +490,29 @@ async function buildFloodPlan(){
   output.textContent="Flood plan could not be calculated: "+error.message;
  }
 }
+
+function renderAnswer(markdown){
+ const target=document.getElementById("answer");
+ const escapeHTML=value=>String(value).replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+ const inline=value=>escapeHTML(value).replace(/\\*\\*(.+?)\\*\\*/g,"<strong>$1</strong>").replace(/\\*(.+?)\\*/g,"<em>$1</em>");
+ const lines=String(markdown||"").replace(/\\r/g,"").split("\\n");
+ let html="",paragraph=[],listType=null;
+ const flushParagraph=()=>{if(paragraph.length){html+="<p>"+inline(paragraph.join(" "))+"</p>";paragraph=[];}};
+ const closeList=()=>{if(listType){html+="</"+listType+">";listType=null;}};
+ lines.forEach(raw=>{
+  const line=raw.trim();
+  if(!line){flushParagraph();closeList();return;}
+  const heading=line.match(/^(#{1,4})\\s+(.+)$/);
+  if(heading){flushParagraph();closeList();const level=Math.min(heading[1].length+1,4);html+="<h"+level+">"+inline(heading[2])+"</h"+level+">";return;}
+  const bullet=line.match(/^[-*•]\\s+(.+)$/);
+  const numbered=line.match(/^\\d+[.)]\\s+(.+)$/);
+  if(bullet||numbered){flushParagraph();const type=bullet?"ul":"ol";if(listType!==type){closeList();html+="<"+type+">";listType=type;}html+="<li>"+inline((bullet||numbered)[1])+"</li>";return;}
+  closeList();paragraph.push(line);
+ });
+ flushParagraph();closeList();
+ target.innerHTML=html;
+}
+
 async function askRiverWatch(){
  const answer=document.getElementById("answer");
  const question=document.getElementById("question").value.trim();
