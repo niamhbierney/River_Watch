@@ -1,121 +1,123 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>River Watch | Flood Response</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #eef3f7;
-      color: #183247;
-      margin: 0;
-    }
-    header {
-      background: #123b55;
-      color: white;
-      padding: 25px;
-      text-align: center;
-    }
-    main {
-      max-width: 950px;
-      margin: 30px auto;
-      padding: 20px;
-    }
-    section {
-      background: white;
-      padding: 22px;
-      margin-bottom: 20px;
-      border-radius: 10px;
-      box-shadow: 0 2px 8px #00000012;
-    }
-    input, button, textarea {
-      padding: 11px;
-      margin-top: 8px;
-      font-size: 15px;
-      max-width: 100%;
-    }
-    button {
-      background: #176b87;
-      color: white;
-      border: 0;
-      border-radius: 5px;
-      cursor: pointer;
-    }
-    #status {
-      color: #176b45;
-    }
-    footer {
-      text-align: center;
-      padding: 20px;
-      font-size: 13px;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>River Watch | Flood Response</title>
+<style>
+body{font-family:Arial,sans-serif;background:#eef3f7;color:#183247;margin:0}
+header{background:#123b55;color:white;padding:25px;text-align:center}
+main{max-width:1100px;margin:30px auto;padding:20px}
+section{background:white;padding:22px;margin-bottom:20px;border-radius:10px;box-shadow:0 2px 8px #00000012}
+input,button,textarea{padding:11px;margin-top:8px;font-size:15px;max-width:100%}
+button{background:#176b87;color:white;border:0;border-radius:5px;cursor:pointer}
+button:hover{background:#12566d}
+#status,#sheetStatus{color:#176b45}
+.table-wrap{overflow-x:auto;margin-top:14px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{border:1px solid #d7e0e7;padding:9px;text-align:left;white-space:nowrap}
+th{background:#eaf1f5}
+.muted{color:#607482;font-size:13px}
+footer{text-align:center;padding:20px;font-size:13px}
+</style>
 </head>
 <body>
-
-<header>
-  <h1>🌊 River Watch</h1>
-  <p>Flood Response Decision Support System</p>
-</header>
-
+<header><h1>🌊 River Watch</h1><p>Flood Response Decision Support System</p></header>
 <main>
-
-  <section>
-    <h2>System Settings</h2>
-    <p>Enter your own OpenAI API key to use the AI assistant.</p>
-    <input type="password" id="apiKey" placeholder="Paste your API key here">
-    <br>
-    <button onclick="saveKey()">Save Key</button>
-    <button onclick="forgetKey()">Forget Key</button>
-    <p id="status"></p>
-  </section>
-
-  <section>
-    <h2>Tonight's Flood Plan</h2>
-    <p>Live river forecasts and weather warnings will appear here.</p>
-    <div id="floodPlan">Waiting for live data connection...</div>
-  </section>
-
-  <section>
-    <h2>Ask River Watch</h2>
-    <textarea id="question" rows="3" style="width:95%"
-      placeholder="e.g. What is tonight's plan?"></textarea>
-    <br>
-    <button onclick="askRiverWatch()">Ask River Watch</button>
-    <div id="answer"></div>
-  </section>
-
+<section>
+<h2>System Settings</h2>
+<p>Enter your own OpenAI API key to use the AI assistant.</p>
+<input type="password" id="apiKey" placeholder="Paste your API key here" autocomplete="off"><br>
+<button onclick="saveKey()">Save Key</button>
+<button onclick="forgetKey()">Forget Key</button>
+<p id="status"></p>
+</section>
+<section>
+<h2>Live River Watch Data</h2>
+<p>The town and resource information below is read from the River Watch Google Sheet.</p>
+<button onclick="loadSheetData()">Refresh Sheet Data</button>
+<p id="sheetStatus" aria-live="polite">Connecting to Google Sheets...</p>
+<div id="sheetData" class="table-wrap"></div>
+<p class="muted">The sheet is fetched when this page loads and whenever Refresh Sheet Data is selected.</p>
+</section>
+<section>
+<h2>Tonight's Flood Plan</h2>
+<p>Live river forecasts and weather warnings will appear here in a later step.</p>
+<div id="floodPlan">Waiting for live forecast and warning connections...</div>
+</section>
+<section>
+<h2>Ask River Watch</h2>
+<textarea id="question" rows="3" style="width:95%" placeholder="e.g. What is tonight's plan?"></textarea><br>
+<button onclick="askRiverWatch()">Ask River Watch</button>
+<div id="answer"></div>
+</section>
 </main>
-
-<footer>
-  AI can make mistakes; a person makes the final decision.
-</footer>
-
+<footer>AI can make mistakes; a person makes the final decision.</footer>
 <script>
-  function saveKey() {
-    const key = document.getElementById("apiKey").value.trim();
-    if (!key) {
-      document.getElementById("status").textContent = "Please enter a key.";
-      return;
-    }
-    localStorage.setItem("riverWatchApiKey", key);
-    document.getElementById("apiKey").value = "";
-    document.getElementById("status").textContent = "Key saved in this browser.";
-  }
-
-  function forgetKey() {
-    localStorage.removeItem("riverWatchApiKey");
-    document.getElementById("apiKey").value = "";
-    document.getElementById("status").textContent = "Key forgotten.";
-  }
-
-  function askRiverWatch() {
-    document.getElementById("answer").textContent =
-      "The AI connection will be added in a later step.";
-  }
+const SHEET_CSV_URL="https://docs.google.com/spreadsheets/d/1HUCHfbe6xJXi24uYlvhKyN62lf2ce1LJhC-A1sJN-0o/export?format=csv";
+function saveKey(){
+ const key=document.getElementById("apiKey").value.trim();
+ if(!key){document.getElementById("status").textContent="Please enter a key.";return;}
+ localStorage.setItem("riverWatchApiKey",key);
+ document.getElementById("apiKey").value="";
+ document.getElementById("status").textContent="Key saved in this browser only.";
+}
+function forgetKey(){
+ localStorage.removeItem("riverWatchApiKey");
+ document.getElementById("apiKey").value="";
+ document.getElementById("status").textContent="Key removed from this browser.";
+}
+function parseCSV(text){
+ const rows=[];let row=[];let field="";let inQuotes=false;
+ for(let i=0;i<text.length;i++){
+  const char=text[i];
+  if(char==='"'){
+   if(inQuotes&&text[i+1]==='"'){field+='"';i++;}
+   else{inQuotes=!inQuotes;}
+  }else if(char===","&&!inQuotes){row.push(field);field="";}
+  else if((char==="\n"||char==="\r")&&!inQuotes){
+   if(char==="\r"&&text[i+1]==="\n")i++;
+   row.push(field);if(row.some(cell=>cell.trim()!==""))rows.push(row);
+   row=[];field="";
+  }else{field+=char;}
+ }
+ row.push(field);if(row.some(cell=>cell.trim()!==""))rows.push(row);
+ return rows;
+}
+function loadSheetData(){
+ const status=document.getElementById("sheetStatus");
+ const output=document.getElementById("sheetData");
+ status.textContent="Refreshing data from Google Sheets...";
+ output.innerHTML="";
+ fetch(SHEET_CSV_URL+"&_="+Date.now(),{cache:"no-store"})
+ .then(response=>{if(!response.ok)throw new Error("Google Sheets returned HTTP "+response.status);return response.text();})
+ .then(csvText=>{
+  const rows=parseCSV(csvText);
+  if(rows.length<2)throw new Error("No data rows were found in the spreadsheet.");
+  const headers=rows[0].map(value=>value.trim());
+  const table=document.createElement("table");
+  const thead=document.createElement("thead");
+  const headerRow=document.createElement("tr");
+  headers.forEach(header=>{const th=document.createElement("th");th.textContent=header;headerRow.appendChild(th);});
+  thead.appendChild(headerRow);table.appendChild(thead);
+  const tbody=document.createElement("tbody");
+  rows.slice(1).forEach(values=>{
+   const tr=document.createElement("tr");
+   headers.forEach((header,index)=>{const td=document.createElement("td");td.textContent=values[index]??"";tr.appendChild(td);});
+   tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);output.appendChild(table);
+  status.textContent="Connected successfully — "+(rows.length-1)+" town records loaded. Last refreshed: "+new Date().toLocaleString();
+ })
+ .catch(error=>{
+  console.error("River Watch sheet connection:",error);
+  status.textContent="Could not load the sheet in the website: "+error.message+". Check the CSV link and browser permissions.";
+ });
+}
+function askRiverWatch(){
+ document.getElementById("answer").textContent="The AI connection will be added in a later step.";
+}
+loadSheetData();
 </script>
-
 </body>
 </html>
