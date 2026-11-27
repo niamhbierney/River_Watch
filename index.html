@@ -594,10 +594,10 @@ Be concise, explain evidence, and distinguish live inputs from recommendations. 
   if(!response.ok)throw new Error(result.error?.message||"OpenAI API request failed (HTTP "+response.status+").");
   const answerText=(result.output||[]).flatMap(item=>item.content||[]).filter(item=>item.type==="output_text").map(item=>item.text).join("\n").trim();
   if(!answerText)throw new Error("The AI returned no text. Please try again.");
-  answer.textContent=answerText+"\n\nSources: Open-Meteo Flood API / Copernicus GloFAS; Met Éireann Open Data; River Watch Google Sheet; stored historical summary.";
+   renderAnswer(answerText+"\n\nSources: Open-Meteo Flood API / Copernicus GloFAS; Met Éireann Open Data; River Watch Google Sheet; stored historical summary.");
  }catch(error){
   console.error("River Watch AI error:",error);
-  answer.textContent="River Watch could not answer this question: "+error.message+" Please check the API key, available API credit, and source connections, then try again.";
+   renderAnswer("River Watch could not answer this question: "+error.message+" Please check the API key, available API credit, and source connections, then try again.");
  }
 }
 loadSheetData();
