@@ -1,0 +1,121 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>River Watch | Flood Response</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #eef3f7;
+      color: #183247;
+      margin: 0;
+    }
+    header {
+      background: #123b55;
+      color: white;
+      padding: 25px;
+      text-align: center;
+    }
+    main {
+      max-width: 950px;
+      margin: 30px auto;
+      padding: 20px;
+    }
+    section {
+      background: white;
+      padding: 22px;
+      margin-bottom: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px #00000012;
+    }
+    input, button, textarea {
+      padding: 11px;
+      margin-top: 8px;
+      font-size: 15px;
+      max-width: 100%;
+    }
+    button {
+      background: #176b87;
+      color: white;
+      border: 0;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    #status {
+      color: #176b45;
+    }
+    footer {
+      text-align: center;
+      padding: 20px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🌊 River Watch</h1>
+  <p>Flood Response Decision Support System</p>
+</header>
+
+<main>
+
+  <section>
+    <h2>System Settings</h2>
+    <p>Enter your own OpenAI API key to use the AI assistant.</p>
+    <input type="password" id="apiKey" placeholder="Paste your API key here">
+    <br>
+    <button onclick="saveKey()">Save Key</button>
+    <button onclick="forgetKey()">Forget Key</button>
+    <p id="status"></p>
+  </section>
+
+  <section>
+    <h2>Tonight's Flood Plan</h2>
+    <p>Live river forecasts and weather warnings will appear here.</p>
+    <div id="floodPlan">Waiting for live data connection...</div>
+  </section>
+
+  <section>
+    <h2>Ask River Watch</h2>
+    <textarea id="question" rows="3" style="width:95%"
+      placeholder="e.g. What is tonight's plan?"></textarea>
+    <br>
+    <button onclick="askRiverWatch()">Ask River Watch</button>
+    <div id="answer"></div>
+  </section>
+
+</main>
+
+<footer>
+  AI can make mistakes; a person makes the final decision.
+</footer>
+
+<script>
+  function saveKey() {
+    const key = document.getElementById("apiKey").value.trim();
+    if (!key) {
+      document.getElementById("status").textContent = "Please enter a key.";
+      return;
+    }
+    localStorage.setItem("riverWatchApiKey", key);
+    document.getElementById("apiKey").value = "";
+    document.getElementById("status").textContent = "Key saved in this browser.";
+  }
+
+  function forgetKey() {
+    localStorage.removeItem("riverWatchApiKey");
+    document.getElementById("apiKey").value = "";
+    document.getElementById("status").textContent = "Key forgotten.";
+  }
+
+  function askRiverWatch() {
+    document.getElementById("answer").textContent =
+      "The AI connection will be added in a later step.";
+  }
+</script>
+
+</body>
+</html>
