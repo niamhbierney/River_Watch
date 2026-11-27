@@ -478,8 +478,37 @@ async function askRiverWatch(){
    met_eireann:{source:MET_WARNING_URL,records:warnings},
    historical_thresholds:history
   };
+  // Calculate the town levels in code before asking the AI to explain them.
+  // This prevents the narrative answer from contradicting the operational table.
+  const calculatedPlan=sheet.map(town=>{
+   const h=history.towns.find(x=>x.town===town.town);
+   const forecast=forecastResults.find(x=>x.town===town.town);
+   if(!h||!forecast)throw new Error("Cannot calculate a level for "+town.town);
+   const override=Number(town.flow_override_m3s);
+   const flow=town.flow_override_m3s!==""&&Number.isFinite(override)?override:forecast.flows[0];
+   const flowLevel=flow>=h.percentile_99?"Barriers":flow>=h.percentile_95?"Standby":"Normal";
+   const warningOverride=String(town.warning_override||"").trim().toLowerCase();
+   const hasSheetOverride=warningOverride==="orange"||warningOverride==="red";
+   const regionsForTown=(town.county||"").toLowerCase();
+   const liveWarning=warnings.some(w=>{
+    const level=String(w.level||"").toLowerCase();
+    const onset=Date.parse(w.onset),expiry=Date.parse(w.expiry);
+    const regions=Array.isArray(w.regions)?w.regions.join(" ").toLowerCase():"";
+    return (level==="orange"||level==="red")&&Number.isFinite(onset)&&Number.isFinite(expiry)&&
+     expiry>=Date.now()&&onset<=Date.now()+48*60*60*1000&&regions.includes(regionsForTown);
+   });
+   const hasWarning=hasSheetOverride||liveWarning;
+   let level=flowLevel;
+   if(hasWarning)level=level==="Normal"?"Standby":level==="Standby"?"Barriers":"Barriers";
+   return {town:town.town,county:town.county,river:town.river,flow_m3s:Number(flow.toFixed(3)),
+    percentile_95_m3s:h.percentile_95,percentile_99_m3s:h.percentile_99,
+    flow_based_level:flowLevel,warning_override:warningOverride||null,
+    qualifying_live_warning:liveWarning,final_level:level,
+    barrier_sets:Number(town.barrier_sets)||0,notes:town.notes||""};
+  });
+  liveData.calculated_flood_plan=calculatedPlan;
   const instructions = `You are River Watch, a flood-response decision-support assistant for an Irish local authority Duty Officer.
-Use ONLY the supplied live data and historical summary for current figures. Do not invent or assume missing data. State the forecast date and retrieval time, cite relevant source names and give numerical evidence for each level.
+Use ONLY the supplied live data and historical summary for current figures. Do not invent or assume missing data. State the forecast date and retrieval time, cite relevant source names and give numerical evidence for each level. CRITICAL: liveData.calculated_flood_plan is calculated deterministically by the website code from the latest Sheet, forecasts and thresholds. Treat its final_level as authoritative. Do not recalculate or contradict it. When answering any question about a town's level or tonight's plan, use final_level exactly as supplied and explain it using flow_m3s, percentile thresholds, warning_override and qualifying_live_warning.
 Rules: Normal below the 95th percentile; Standby at or above the 95th; Barriers at or above the 99th. An orange/red Met Éireann warning affecting the town's county and valid now or beginning within 48 hours raises the level one step. IMPORTANT: The Google Sheet warning_override column is an explicit operational override for testing and must be applied even when the live Met Éireann feed contains no matching warning. A town with warning_override set to orange or red must be moved up exactly one level from its flow-based level. This Sheet override is authoritative and must never be ignored or described as merely an unconfirmed warning. A blank override means use the live Met Éireann feed only. PRECEDENCE: First calculate the flow-based level, then apply warning_override (orange/red raises it exactly one level), then apply any matching live Met Éireann warning if no Sheet override is present. The warning_override column is a deliberate test input, not a claim about an official warning. It takes precedence over any general wording in the notes column. Notes describe resources and operational constraints only; they must never cancel, weaken, or make a warning_override conditional. When the Sheet contains warning_override=orange or red, state the resulting level directly and confidently. Do not say 'if the override is in force', 'confirm whether the override is valid', or ask the Duty Officer to verify it. When explaining a town's level, state the flow-based level, identify the Sheet override, and state the resulting level; do not contradict the calculated flood-plan table.
 Crew capacity is max two towns per crew per night: Clonmel crew serves Clonmel, Fermoy, Enniscorthy; Mallow crew serves Mallow, Fermoy, Bandon; Athlone crew serves Athlone, Carrick-on-Shannon, Ennis. If barrier demand exceeds capacity, rank by percentage above the 99th percentile, then higher forecast peak. A town with zero barrier sets cannot receive barriers: give all Standby measures and flag to Area Manager. If no eligible crew capacity remains, give Standby measures and flag to Area Manager. Treat every Google Sheet notes field as operationally important.
 Out of scope: coastal/tidal flooding, road closures, insurance, and individual homes. Politely refer those questions to the council area office.
