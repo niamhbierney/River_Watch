@@ -479,7 +479,7 @@ async function buildFloodPlan(){
   const date=forecasts[0].dates[0];
   let html="<h3>Flood response plan — "+date+"</h3>";
   html+="<p>Forecasts and warnings refreshed at "+new Date().toLocaleString()+".</p>";
-  html+="<table><tr><th>Town</th><th>Forecast (m³/s)</th><th>95th percentile</th><th>99th percentile</th><th>Level</th><th>Crew / action</th></tr>";
+  html+="<div class=\"table-wrap\"><table><tr><th>Town</th><th>Forecast (m³/s)</th><th>95th percentile</th><th>99th percentile</th><th>Level</th><th>Crew / action</th></tr>";
 
   plan.forEach(t=>{
    let action=t.assignedCrew?"Barrier crew: "+t.assignedCrew:
@@ -489,7 +489,7 @@ async function buildFloodPlan(){
     "</td><td>"+t.p95.toFixed(3)+"</td><td>"+t.p99.toFixed(3)+
     "</td><td>"+t.level+"</td><td>"+action+"</td></tr>";
   });
-  html+="</table>";
+  html+="</table></div>";
   html+="<p><strong>Important:</strong> This is decision support only. The Duty Officer must review the information and make the final decision.</p>";
   output.innerHTML=html;
 
