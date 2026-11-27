@@ -374,8 +374,22 @@ function warningAffectsTown(warning,town,now=Date.now()){
  const level=String(warning.level||"").toLowerCase();
  const onset=Date.parse(warning.onset),expiry=Date.parse(warning.expiry);
  if((level!=="orange"&&level!=="red")||!Number.isFinite(onset)||!Number.isFinite(expiry)||expiry<now||onset>now+48*60*60*1000)return false;
- const regions=(Array.isArray(warning.regions)?warning.regions.join(" "):String(warning.regions||"")).toLowerCase();
- return getTownCounties(town).some(county=>new RegExp("(^|[^a-z])"+county.toLowerCase()+"([^a-z]|$)","i").test(regions));
+ // Met Éireann's JSON feed uses FIPS county codes in warning.regions, not county names.
+ const countyFips={
+  "carlow":"EI01","cavan":"EI02","clare":"EI03","cork":"EI04",
+  "donegal":"EI06","dublin":"EI07","galway":"EI10","kerry":"EI11",
+  "kildare":"EI12","kilkenny":"EI13","leitrim":"EI14","laois":"EI15",
+  "limerick":"EI16","longford":"EI18","louth":"EI19","mayo":"EI20",
+  "meath":"EI21","monaghan":"EI22","offaly":"EI23","roscommon":"EI24",
+  "sligo":"EI25","tipperary":"EI26","waterford":"EI27","westmeath":"EI29",
+  "wexford":"EI30","wicklow":"EI31"
+ };
+ const regionCodes=Array.isArray(warning.regions)?warning.regions.map(code=>String(code).trim().toUpperCase()):[];
+ return getTownCounties(town).some(county=>{
+  const normalized=String(county).toLowerCase().replace(/^county\\s+/,"").replace(/^co\\.?\\s+/,"").trim();
+  const code=countyFips[normalized];
+  return Boolean(code&&regionCodes.includes(code));
+ });
 }
 async function loadWeatherWarnings(){
  const status=document.getElementById("warningStatus");
