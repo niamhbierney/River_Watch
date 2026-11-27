@@ -501,9 +501,11 @@ async function buildFloodPlan(){
 
   // Rank towns needing barriers by percentage above the 99th percentile,
   // then by forecast flow. Assign no more than two towns to each crew.
+  const mallowTown = towns.find(t=>t.town==="Mallow");
+  const mallowRestricted = /Mallow crew can work in Mallow only tonight/i.test(mallowTown?.notes||"");
   const crewAreas={
    "Clonmel":["Clonmel","Fermoy","Enniscorthy"],
-   "Mallow":["Mallow","Fermoy","Bandon"],
+   "Mallow":mallowRestricted?["Mallow"]:["Mallow","Fermoy","Bandon"],
    "Athlone":["Athlone","Carrick-on-Shannon","Ennis"]
   };
   const crewUse={Clonmel:0,Mallow:0,Athlone:0};
