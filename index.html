@@ -303,7 +303,24 @@ async function loadHistorySummary(force=false){
    const pairs=data.daily.time.map((date,i)=>({date,value:data.daily.river_discharge[i]})).filter(x=>x.date>=HISTORY_START&&x.date<=HISTORY_END&&Number.isFinite(x.value));
    if(pairs.length<3650)throw new Error(place.town+": fewer than 10 years of valid daily values ("+pairs.length+" days)");
    const values=pairs.map(x=>x.value);
-   summaries.push({town:place.town,river:place.river,latitude:place.lat,longitude:place.lon,period_start:pairs[0].date,period_end:pairs[pairs.length-1].date,valid_days:pairs.length,percentile_95:Number(percentile(values,.95).toFixed(3)),percentile_99:Number(percentile(values,.99).toFixed(3))});
+   const p99=percentile(values,.99);
+   const winters={};
+   for(let year=2016;year<=2024;year++){
+    const winter=year+"/"+String(year+1).slice(-2);
+    const start=year+"-10-01",end=(year+1)+"-03-31";
+    let events=0,previousDate=null,previousAbove=false;
+    pairs.filter(x=>x.date>=start&&x.date<=end).forEach(x=>{
+     const above=x.value>=p99;
+     const yesterday=previousDate&&((Date.parse(x.date+"T00:00:00Z")-Date.parse(previousDate+"T00:00:00Z"))===86400000);
+     if(above&&(!previousAbove||!yesterday))events++;
+     previousAbove=above;
+     previousDate=x.date;
+    });
+    winters[winter]=events;
+   }
+   const firstFour=["2016/17","2017/18","2018/19","2019/20"].reduce((sum,w)=>sum+winters[w],0);
+   const lastFour=["2021/22","2022/23","2023/24","2024/25"].reduce((sum,w)=>sum+winters[w],0);
+   summaries.push({town:place.town,river:place.river,latitude:place.lat,longitude:place.lon,period_start:pairs[0].date,period_end:pairs[pairs.length-1].date,valid_days:pairs.length,percentile_95:Number(percentile(values,.95).toFixed(3)),percentile_99:Number(p99.toFixed(3)),high_flow_events_by_winter:winters,first_four_winter_events:firstFour,last_four_winter_events:lastFour,last_four_more_than_first_four:lastFour>firstFour});
    if(index<RIVER_TOWNS.length-1)await new Promise(resolve=>setTimeout(resolve,2000));
   }
   const summary={source:"Open-Meteo Flood API / Copernicus GloFAS",period_start:HISTORY_START,period_end:HISTORY_END,percentile_method:"Linear interpolation; Excel PERCENTILE.INC",calculated_at:new Date().toISOString(),towns:summaries};
@@ -320,6 +337,13 @@ function renderHistorySummary(summary){
  const tbody=document.createElement("tbody");
  (summary.towns||[]).forEach(t=>{const tr=document.createElement("tr");[t.town,t.river,t.valid_days,t.period_start+" to "+t.period_end,Number(t.percentile_95).toFixed(3),Number(t.percentile_99).toFixed(3)].forEach(x=>{const td=document.createElement("td");td.textContent=x;tr.appendChild(td);});tbody.appendChild(tr);});
  table.appendChild(tbody);output.appendChild(table);
+ const title=document.createElement("h3");title.textContent="High-flow events by winter (consecutive days at or above the town's 99th percentile)";output.appendChild(title);
+ const eventsTable=document.createElement("table"),eventsHead=document.createElement("tr");
+ ["Town","2016/17","2017/18","2018/19","2019/20","2020/21","2021/22","2022/23","2023/24","2024/25","First 4 winters","Last 4 winters","More in last 4?"].forEach(x=>{const th=document.createElement("th");th.textContent=x;eventsHead.appendChild(th);});
+ const eventsThead=document.createElement("thead");eventsThead.appendChild(eventsHead);eventsTable.appendChild(eventsThead);
+ const eventsBody=document.createElement("tbody");
+ (summary.towns||[]).forEach(t=>{const tr=document.createElement("tr");const vals=[t.town,...["2016/17","2017/18","2018/19","2019/20","2020/21","2021/22","2022/23","2023/24","2024/25"].map(w=>t.high_flow_events_by_winter?.[w]??"—"),t.first_four_winter_events??"—",t.last_four_winter_events??"—",t.last_four_more_than_first_four===true?"Yes":t.last_four_more_than_first_four===false?"No":"Not calculated"];vals.forEach(x=>{const td=document.createElement("td");td.textContent=x;tr.appendChild(td);});eventsBody.appendChild(tr);});
+ eventsTable.appendChild(eventsBody);output.appendChild(eventsTable);
 }
 function downloadHistorySummary(){
  const saved=localStorage.getItem(HISTORY_STORAGE_KEY);
