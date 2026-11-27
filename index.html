@@ -445,8 +445,63 @@ async function buildFloodPlan(){
   output.textContent="Flood plan could not be calculated: "+error.message;
  }
 }
-function askRiverWatch(){
- document.getElementById("answer").textContent="The AI connection will be added in a later step.";
+async function askRiverWatch(){
+ const answer=document.getElementById("answer");
+ const question=document.getElementById("question").value.trim();
+ const key=localStorage.getItem("riverWatchApiKey");
+ if(!question){answer.textContent="Please enter a question first.";return;}
+ if(!key){answer.textContent="Please add and save your OpenAI API key in System Settings first.";return;}
+ answer.textContent="Refreshing live sources and preparing your answer...";
+ try{
+  const sheetResponse=await fetch(SHEET_CSV_URL+"&_="+Date.now(),{cache:"no-store"});
+  if(!sheetResponse.ok)throw new Error("Google Sheets could not be refreshed (HTTP "+sheetResponse.status+").");
+  const sheetRows=parseCSV(await sheetResponse.text());
+  const sheetHeaders=sheetRows[0].map(x=>x.trim());
+  const sheet=sheetRows.slice(1).map(row=>{const item={};sheetHeaders.forEach((h,i)=>item[h]=(row[i]||"").trim());return item;});
+  const forecastResults=await Promise.all(RIVER_TOWNS.map(async place=>{
+   const url="https://flood-api.open-meteo.com/v1/flood?latitude="+place.lat+"&longitude="+place.lon+"&daily=river_discharge&forecast_days=7&timezone=GMT";
+   const response=await fetch(url,{cache:"no-store"});
+   if(!response.ok)throw new Error("River forecast unavailable for "+place.town+" (HTTP "+response.status+").");
+   const data=await response.json();
+   if(data.error||!data.daily)throw new Error("No forecast data returned for "+place.town+".");
+   return {town:place.town,river:place.river,dates:data.daily.time,flows:data.daily.river_discharge,source:"Open-Meteo Flood API / Copernicus GloFAS"};
+  }));
+  const warningResponse=await fetch(MET_WARNING_URL+"?_="+Date.now(),{cache:"no-store"});
+  if(!warningResponse.ok)throw new Error("Met Éireann warnings could not be refreshed (HTTP "+warningResponse.status+").");
+  const warnings=await warningResponse.json();
+  const history=JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY)||"null");
+  if(!history||!Array.isArray(history.towns)||history.towns.length!==8)throw new Error("Please calculate the ten-year historical thresholds first.");
+  const liveData={
+   retrieved_at:new Date().toISOString(),
+   google_sheet:{url:"https://docs.google.com/spreadsheets/d/1HUCHfbe6xJXi24uYlvhKyN62lf2ce1LJhC-A1sJN-0o/edit",town_resources:sheet},
+   river_forecasts:forecastResults,
+   met_eireann:{source:MET_WARNING_URL,records:warnings},
+   historical_thresholds:history
+  };
+  const instructions = `You are River Watch, a flood-response decision-support assistant for an Irish local authority Duty Officer.
+Use ONLY the supplied live data and historical summary for current figures. Do not invent or assume missing data. State the forecast date and retrieval time, cite relevant source names and give numerical evidence for each level.
+Rules: Normal below the 95th percentile; Standby at or above the 95th; Barriers at or above the 99th. An orange/red Met Éireann warning affecting the town's county and valid now or beginning within 48 hours raises the level one step.
+Crew capacity is max two towns per crew per night: Clonmel crew serves Clonmel, Fermoy, Enniscorthy; Mallow crew serves Mallow, Fermoy, Bandon; Athlone crew serves Athlone, Carrick-on-Shannon, Ennis. If barrier demand exceeds capacity, rank by percentage above the 99th percentile, then higher forecast peak. A town with zero barrier sets cannot receive barriers: give all Standby measures and flag to Area Manager. If no eligible crew capacity remains, give Standby measures and flag to Area Manager. Treat every Google Sheet notes field as operationally important.
+Out of scope: coastal/tidal flooding, road closures, insurance, and individual homes. Politely refer those questions to the council area office.
+For flood-defence study priority, only use a supplied consecutive-day high-flow event analysis for winters 2016/17 through 2024/25. If absent, say it has not yet been calculated; do not guess.
+Be concise, explain evidence, and distinguish live inputs from recommendations. A human Duty Officer makes the final decision.`;
+  const response=await fetch("https://api.openai.com/v1/responses",{
+   method:"POST",
+   headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},
+   body:JSON.stringify({model:"gpt-6.2-sol",input:[
+    {role:"developer",content:[{type:"input_text",text:instructions}]},
+    {role:"user",content:[{type:"input_text",text:"Duty Officer question: "+question+"\n\nLatest source data (JSON):\n"+JSON.stringify(liveData)}]}
+   ],max_output_tokens:1800})
+  });
+  const result=await response.json();
+  if(!response.ok)throw new Error(result.error?.message||"OpenAI API request failed (HTTP "+response.status+").");
+  const answerText=(result.output||[]).flatMap(item=>item.content||[]).filter(item=>item.type==="output_text").map(item=>item.text).join("\n").trim();
+  if(!answerText)throw new Error("The AI returned no text. Please try again.");
+  answer.textContent=answerText+"\n\nSources: Open-Meteo Flood API / Copernicus GloFAS; Met Éireann Open Data; River Watch Google Sheet; stored historical summary.";
+ }catch(error){
+  console.error("River Watch AI error:",error);
+  answer.textContent="River Watch could not answer this question: "+error.message+" Please check the API key, available API credit, and source connections, then try again.";
+ }
 }
 loadSheetData();
 loadRiverForecasts();
