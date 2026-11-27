@@ -494,18 +494,18 @@ async function buildFloodPlan(){
 function renderAnswer(markdown){
  const target=document.getElementById("answer");
  const escapeHTML=value=>String(value).replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
- const inline=value=>escapeHTML(value).replace(/\\*\\*(.+?)\\*\\*/g,"<strong>$1</strong>").replace(/\\*(.+?)\\*/g,"<em>$1</em>");
- const lines=String(markdown||"").replace(/\\r/g,"").split("\\n");
+ const inline=value=>escapeHTML(value).replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>").replace(/\*(.+?)\*/g,"<em>$1</em>");
+ const lines=String(markdown||"").replace(/\r/g,"").split("\n");
  let html="",paragraph=[],listType=null;
  const flushParagraph=()=>{if(paragraph.length){html+="<p>"+inline(paragraph.join(" "))+"</p>";paragraph=[];}};
  const closeList=()=>{if(listType){html+="</"+listType+">";listType=null;}};
  lines.forEach(raw=>{
   const line=raw.trim();
   if(!line){flushParagraph();closeList();return;}
-  const heading=line.match(/^(#{1,4})\\s+(.+)$/);
+  const heading=line.match(/^(#{1,4})\s+(.+)$/);
   if(heading){flushParagraph();closeList();const level=Math.min(heading[1].length+1,4);html+="<h"+level+">"+inline(heading[2])+"</h"+level+">";return;}
-  const bullet=line.match(/^[-*•]\\s+(.+)$/);
-  const numbered=line.match(/^\\d+[.)]\\s+(.+)$/);
+  const bullet=line.match(/^[-*•]\s+(.+)$/);
+  const numbered=line.match(/^\d+[.)]\s+(.+)$/);
   if(bullet||numbered){flushParagraph();const type=bullet?"ul":"ol";if(listType!==type){closeList();html+="<"+type+">";listType=type;}html+="<li>"+inline((bullet||numbered)[1])+"</li>";return;}
   closeList();paragraph.push(line);
  });
